@@ -1,0 +1,2291 @@
+# 1 "basic.p4"
+# 1 "<built-in>"
+# 1 "<command-line>"
+# 1 "basic.p4"
+/* -*- P4_16 -*- */
+# 1 "/usr/local/share/p4c/p4include/core.p4" 1
+/*
+Copyright 2013-present Barefoot Networks, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* This is the P4-16 core library, which declares some built-in P4 constructs using P4 */
+
+
+
+
+/// Standard error codes.  New error codes can be declared by users.
+error {
+    NoError, /// No error.
+    PacketTooShort, /// Not enough bits in packet for 'extract'.
+    NoMatch, /// 'select' expression has no matches.
+    StackOutOfBounds, /// Reference to invalid element of a header stack.
+    HeaderTooShort, /// Extracting too many bits into a varbit field.
+    ParserTimeout, /// Parser execution time limit exceeded.
+    ParserInvalidArgument /// Parser operation was called with a value
+                           /// not supported by the implementation.
+}
+
+extern packet_in {
+    /// Read a header from the packet into a fixed-sized header @hdr and advance the cursor.
+    /// May trigger error PacketTooShort or StackOutOfBounds.
+    /// @T must be a fixed-size header type
+    void extract<T>(out T hdr);
+    /// Read bits from the packet into a variable-sized header @variableSizeHeader
+    /// and advance the cursor.
+    /// @T must be a header containing exactly 1 varbit field.
+    /// May trigger errors PacketTooShort, StackOutOfBounds, or HeaderTooShort.
+    void extract<T>(out T variableSizeHeader,
+                    in bit<32> variableFieldSizeInBits);
+    /// Read bits from the packet without advancing the cursor.
+    /// @returns: the bits read from the packet.
+    /// T may be an arbitrary fixed-size type.
+    T lookahead<T>();
+    /// Advance the packet cursor by the specified number of bits.
+    void advance(in bit<32> sizeInBits);
+    /// @return packet length in bytes.  This method may be unavailable on
+    /// some target architectures.
+    bit<32> length();
+}
+
+extern packet_out {
+    /// Write @hdr into the output packet, advancing cursor.
+    /// @T can be a header type, a header stack, a header_union, or a struct
+    /// containing fields with such types.
+    void emit<T>(in T hdr);
+}
+
+// TODO: remove from this file, convert to built-in
+/// Check a predicate @check in the parser; if the predicate is true do nothing,
+/// otherwise set the parser error to @toSignal, and transition to the `reject` state.
+extern void verify(in bool check, in error toSignal);
+
+/// Built-in action that does nothing.
+action NoAction() {}
+
+/// Standard match kinds for table key fields.
+/// Some architectures may not support all these match kinds.
+/// Architectures can declare additional match kinds.
+match_kind {
+    /// Match bits exactly.
+    exact,
+    /// Ternary match, using a mask.
+    ternary,
+    /// Longest-prefix match.
+    lpm
+}
+# 3 "basic.p4" 2
+# 1 "/usr/local/share/p4c/p4include/v1model.p4" 1
+/*
+Copyright 2013-present Barefoot Networks, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* P4-16 declaration of the P4 v1.0 switch model */
+
+
+
+
+# 1 "/usr/local/share/p4c/p4include/core.p4" 1
+/*
+Copyright 2013-present Barefoot Networks, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* This is the P4-16 core library, which declares some built-in P4 constructs using P4 */
+# 23 "/usr/local/share/p4c/p4include/v1model.p4" 2
+
+match_kind {
+    range,
+    // Used for implementing dynamic_action_selection
+    selector
+}
+
+// Are these correct?
+@metadata @name("standard_metadata")
+struct standard_metadata_t {
+    bit<9> ingress_port;
+    bit<9> egress_spec;
+    bit<9> egress_port;
+    bit<32> clone_spec;
+    bit<32> instance_type;
+    // The drop and recirculate_port fields are not used at all by the
+    // behavioral-model simple_switch software switch as of September
+    // 2018, and perhaps never was.  They may be considered
+    // deprecated, at least for that P4 target device.  simple_switch
+    // uses the value of the egress_spec field to determine whether a
+    // packet is dropped or not, and it is recommended to use the
+    // P4_14 drop() primitive action, or the P4_16 + v1model
+    // mark_to_drop() primitive action, to cause that field to be
+    // changed so the packet will be dropped.
+    bit<1> drop;
+    bit<16> recirculate_port;
+    bit<32> packet_length;
+    //
+    // @alias is used to generate the field_alias section of the BMV2 JSON.
+    // Field alias creates a mapping from the metadata name in P4 program to
+    // the behavioral model's internal metadata name. Here we use it to
+    // expose all metadata supported by simple switch to the user through
+    // standard_metadata_t.
+    //
+    // flattening fields that exist in bmv2-ss
+    // queueing metadata
+    @alias("queueing_metadata.enq_timestamp") bit<32> enq_timestamp;
+    @alias("queueing_metadata.enq_qdepth") bit<19> enq_qdepth;
+    @alias("queueing_metadata.deq_timedelta") bit<32> deq_timedelta;
+    @alias("queueing_metadata.deq_qdepth") bit<19> deq_qdepth;
+    // intrinsic metadata
+    @alias("intrinsic_metadata.ingress_global_timestamp") bit<48> ingress_global_timestamp;
+    @alias("intrinsic_metadata.egress_global_timestamp") bit<48> egress_global_timestamp;
+    @alias("intrinsic_metadata.lf_field_list") bit<32> lf_field_list;
+    @alias("intrinsic_metadata.mcast_grp") bit<16> mcast_grp;
+    @alias("intrinsic_metadata.resubmit_flag") bit<32> resubmit_flag;
+    @alias("intrinsic_metadata.egress_rid") bit<16> egress_rid;
+    /// Indicates that a verify_checksum() method has failed.
+    // 1 if a checksum error was found, otherwise 0.
+    bit<1> checksum_error;
+    @alias("intrinsic_metadata.recirculate_flag") bit<32> recirculate_flag;
+    /// Error produced by parsing
+    error parser_error;
+}
+
+enum CounterType {
+    packets,
+    bytes,
+    packets_and_bytes
+}
+
+enum MeterType {
+    packets,
+    bytes
+}
+
+extern counter {
+    counter(bit<32> size, CounterType type);
+    /***
+     * count() causes the counter state with the specified index to be
+     * read, modified, and written back, atomically relative to the
+     * processing of other packets, updating the packet count, byte
+     * count, or both, depending upon the CounterType of the counter
+     * instance used when it was constructed.
+     *
+     * @param index The index of the counter state in the array to be
+     *              updated, normally a value in the range [0,
+     *              size-1].  If index >= size, no counter state will be
+     *              updated.
+     */
+    void count(in bit<32> index);
+}
+
+extern direct_counter {
+    /***
+     * A direct_counter object is created by calling its constructor.
+     * You must provide a choice of whether to maintain only a packet
+     * count (CounterType.packets), only a byte count
+     * (CounterType.bytes), or both (CounterType.packets_and_bytes).
+     * After constructing the object, you can associate it with at
+     * most one table, by adding the following table property to the
+     * definition of that table:
+     *
+     *     counters = <object_name>;
+     */
+    direct_counter(CounterType type);
+    /***
+     * The count() method is actually unnecessary in the v1model
+     * architecture.  This is because after a direct_counter object
+     * has been associated with a table as described in the
+     * documentation for the direct_counter constructor, every time
+     * the table is applied and a table entry is matched, the counter
+     * state associated with the matching entry is read, modified, and
+     * written back, atomically relative to the processing of other
+     * packets, regardless of whether the count() method is called in
+     * the body of that action.
+     */
+    void count();
+}
+
+
+
+
+
+extern meter {
+    meter(bit<32> size, MeterType type);
+    /***
+     * execute_meter() causes the meter state with the specified index
+     * to be read, modified, and written back, atomically relative to
+     * the processing of other packets, and an integer encoding of one
+     * of the colors green, yellow, or red to be written to the result
+     * out parameter.
+     *
+     * @param index The index of the meter state in the array to be
+     *              updated, normally a value in the range [0,
+     *              size-1].  If index >= size, no meter state will be
+     *              updated.
+     * @param result Type T must be bit<W> with W >= 2.  When index is
+     *              in range, the value of result will be assigned 0
+     *              for color GREEN, 1 for color YELLOW, and 2 for
+     *              color RED (see RFC 2697 and RFC 2698 for the
+     *              meaning of these colors).  When index is out of
+     *              range, the final value of result is not specified,
+     *              and should be ignored by the caller.
+     */
+    void execute_meter<T>(in bit<32> index, out T result);
+}
+
+extern direct_meter<T> {
+    /***
+     * A direct_meter object is created by calling its constructor.
+     * You must provide a choice of whether to meter based on the
+     * number of packets, regardless of their size
+     * (MeterType.packets), or based upon the number of bytes the
+     * packets contain (MeterType.bytes).  After constructing the
+     * object, you can associate it with at most one table, by adding
+     * the following table property to the definition of that table:
+     *
+     *     meters = <object_name>;
+     */
+    direct_meter(MeterType type);
+    /***
+     * After a direct_meter object has been associated with a table as
+     * described in the documentation for the direct_meter
+     * constructor, every time the table is applied and a table entry
+     * is matched, the meter state associated with the matching entry
+     * is read, modified, and written back, atomically relative to the
+     * processing of other packets, regardless of whether the read()
+     * method is called in the body of that action.
+     *
+     * read() may only be called within an action executed as a result
+     * of matching a table entry, of a table that has a direct_meter
+     * associated with it.  Calling read() causes an integer encoding
+     * of one of the colors green, yellow, or red to be written to the
+     * result out parameter.
+     *
+     * @param result Type T must be bit<W> with W >= 2.  The value of
+     *              result will be assigned 0 for color GREEN, 1 for
+     *              color YELLOW, and 2 for color RED (see RFC 2697
+     *              and RFC 2698 for the meaning of these colors).
+     */
+    void read(out T result);
+}
+
+extern register<T> {
+    register(bit<32> size);
+    /***
+     * read() reads the state of the register array stored at the
+     * specified index, and returns it as the value written to the
+     * result parameter.
+     *
+     * @param index The index of the register array element to be
+     *              read, normally a value in the range [0, size-1].
+     * @param result Only types T that are bit<W> are currently
+     *              supported.  When index is in range, the value of
+     *              result becomes the value read from the register
+     *              array element.  When index >= size, the final
+     *              value of result is not specified, and should be
+     *              ignored by the caller.
+     */
+    void read(out T result, in bit<32> index);
+    /***
+     * write() writes the state of the register array at the specified
+     * index, with the value provided by the value parameter.
+     *
+     * If you wish to perform a read() followed later by a write() to
+     * the same register array element, and you wish the
+     * read-modify-write sequence to be atomic relative to other
+     * processed packets, then there may be parallel implementations
+     * of the v1model architecture for which you must execute them in
+     * a P4_16 block annotated with an @atomic annotation.  See the
+     * P4_16 language specification description of the @atomic
+     * annotation for more details.
+     *
+     * @param index The index of the register array element to be
+     *              written, normally a value in the range [0,
+     *              size-1].  If index >= size, no register state will
+     *              be updated.
+     * @param value Only types T that are bit<W> are currently
+     *              supported.  When index is in range, this
+     *              parameter's value is written into the register
+     *              array element specified by index.
+     */
+    void write(in bit<32> index, in T value);
+}
+
+// used as table implementation attribute
+extern action_profile {
+    action_profile(bit<32> size);
+}
+
+/***
+ * Generate a random number in the range lo..hi, inclusive, and write
+ * it to the result parameter.  The value written to result is not
+ * specified if lo > hi.
+ *
+ * @param T          Must be a type bit<W>
+ */
+extern void random<T>(out T result, in T lo, in T hi);
+
+// If the type T is a named struct, the name is used
+// to generate the control-plane API.
+extern void digest<T>(in bit<32> receiver, in T data);
+
+enum HashAlgorithm {
+    crc32,
+    crc32_custom,
+    crc16,
+    crc16_custom,
+    random,
+    identity,
+    csum16,
+    xor16
+}
+
+@deprecated("Please use mark_to_drop(standard_metadata) instead.")
+extern void mark_to_drop();
+
+/***
+ * mark_to_drop(standard_metadata) is a primitive action that modifies
+ * standard_metadata.egress_spec to an implementation-specific special
+ * value that in some cases causes the packet to be dropped at the end
+ * of ingress or egress processing.  It also assigns 0 to
+ * standard_metadata.mcast_grp.  Either of those metadata fields may
+ * be changed by executing later P4 code, after calling
+ * mark_to_drop(), and this can change the resulting behavior of the
+ * packet to do something other than drop.
+ *
+ * See
+ * https://github.com/p4lang/behavioral-model/blob/master/docs/simple_switch.md
+ * -- in particular the section "Pseudocode for what happens at the
+ * end of ingress and egress processing" -- for the relative priority
+ * of the different possible things that can happen to a packet when
+ * ingress and egress processing are complete.
+ */
+extern void mark_to_drop(inout standard_metadata_t standard_metadata);
+
+/***
+ * Calculate a hash function of the value specified by the data
+ * parameter.  The value written to the out parameter named result
+ * will always be in the range [base, base+max-1] inclusive, if max >=
+ * 1.  If max=0, the value written to result will always be base.
+ *
+ * @param O          Must be a type bit<W>
+ * @param D          Must be a tuple type where all the fields are bit-fields (type bit<W> or int<W>) or varbits.
+ * @param T          Must be a type bit<W>
+ * @param M          Must be a type bit<W>
+ */
+extern void hash<O, T, D, M>(out O result, in HashAlgorithm algo, in T base, in D data, in M max);
+
+extern action_selector {
+    action_selector(HashAlgorithm algorithm, bit<32> size, bit<32> outputWidth);
+}
+
+enum CloneType {
+    I2E,
+    E2E
+}
+
+@deprecated("Please use verify_checksum/update_checksum instead.")
+extern Checksum16 {
+    Checksum16();
+    bit<16> get<D>(in D data);
+}
+
+/**
+Verifies the checksum of the supplied data.
+If this method detects that a checksum of the data is not correct it
+sets the standard_metadata checksum_error bit.
+@param T          Must be a tuple type where all the tuple elements are of type bit<W>, int<W>, or varbit<W>.
+                  The total dynamic length of the fields is a multiple of the output size.
+@param O          Checksum type; must be bit<X> type.
+@param condition  If 'false' the verification always succeeds.
+@param data       Data whose checksum is verified.
+@param checksum   Expected checksum of the data; note that is must be a left-value.
+@param algo       Algorithm to use for checksum (not all algorithms may be supported).
+                  Must be a compile-time constant.
+*/
+extern void verify_checksum<T, O>(in bool condition, in T data, inout O checksum, HashAlgorithm algo);
+/**
+Computes the checksum of the supplied data.
+@param T          Must be a tuple type where all the tuple elements are of type bit<W>, int<W>, or varbit<W>.
+                  The total dynamic length of the fields is a multiple of the output size.
+@param O          Output type; must be bit<X> type.
+@param condition  If 'false' the checksum is not changed
+@param data       Data whose checksum is computed.
+@param checksum   Checksum of the data.
+@param algo       Algorithm to use for checksum (not all algorithms may be supported).
+                  Must be a compile-time constant.
+*/
+extern void update_checksum<T, O>(in bool condition, in T data, inout O checksum, HashAlgorithm algo);
+
+/**
+Verifies the checksum of the supplied data including the payload.
+The payload is defined as "all bytes of the packet which were not parsed by the parser".
+If this method detects that a checksum of the data is not correct it
+sets the standard_metadata checksum_error bit.
+@param T          Must be a tuple type where all the tuple elements are of type bit<W>, int<W>, or varbit<W>.
+                  The total dynamic length of the fields is a multiple of the output size.
+@param O          Checksum type; must be bit<X> type.
+@param condition  If 'false' the verification always succeeds.
+@param data       Data whose checksum is verified.
+@param checksum   Expected checksum of the data; note that is must be a left-value.
+@param algo       Algorithm to use for checksum (not all algorithms may be supported).
+                  Must be a compile-time constant.
+*/
+extern void verify_checksum_with_payload<T, O>(in bool condition, in T data, inout O checksum, HashAlgorithm algo);
+/**
+Computes the checksum of the supplied data including the payload.
+The payload is defined as "all bytes of the packet which were not parsed by the parser".
+@param T          Must be a tuple type where all the tuple elements are of type bit<W>, int<W>, or varbit<W>.
+                  The total dynamic length of the fields is a multiple of the output size.
+@param O          Output type; must be bit<X> type.
+@param condition  If 'false' the checksum is not changed
+@param data       Data whose checksum is computed.
+@param checksum   Checksum of the data.
+@param algo       Algorithm to use for checksum (not all algorithms may be supported).
+                  Must be a compile-time constant.
+*/
+extern void update_checksum_with_payload<T, O>(in bool condition, in T data, inout O checksum, HashAlgorithm algo);
+
+extern void resubmit<T>(in T data);
+extern void recirculate<T>(in T data);
+extern void clone(in CloneType type, in bit<32> session);
+extern void clone3<T>(in CloneType type, in bit<32> session, in T data);
+
+extern void truncate(in bit<32> length);
+
+// The name 'standard_metadata' is reserved
+
+// Architecture.
+// M should be a struct of structs
+// H should be a struct of headers, stacks or header_unions
+
+parser Parser<H, M>(packet_in b,
+                    out H parsedHdr,
+                    inout M meta,
+                    inout standard_metadata_t standard_metadata);
+
+/* The only legal statements in the implementation of the
+VerifyChecksum control are: block statements, calls to the
+verify_checksum and verify_checksum_with_payload methods,
+and return statements. */
+control VerifyChecksum<H, M>(inout H hdr,
+                             inout M meta);
+@pipeline
+control Ingress<H, M>(inout H hdr,
+                      inout M meta,
+                      inout standard_metadata_t standard_metadata);
+@pipeline
+control Egress<H, M>(inout H hdr,
+                     inout M meta,
+                     inout standard_metadata_t standard_metadata);
+
+/* The only legal statements in the implementation of the
+ComputeChecksum control are: block statements, calls to the
+update_checksum and update_checksum_with_payload methods,
+and return statements. */
+control ComputeChecksum<H, M>(inout H hdr,
+                              inout M meta);
+
+/* The only legal statements in a Deparser control are: calls to the
+packet_out.emit() method. */
+@deparser
+control Deparser<H>(packet_out b, in H hdr);
+
+package V1Switch<H, M>(Parser<H, M> p,
+                       VerifyChecksum<H, M> vr,
+                       Ingress<H, M> ig,
+                       Egress<H, M> eg,
+                       ComputeChecksum<H, M> ck,
+                       Deparser<H> dep
+                       );
+# 4 "basic.p4" 2
+
+const bit<16> TYPE_IPV4 = 0x800;
+
+
+
+
+
+/*************************************************************************
+*********************** H E A D E R S  ***********************************
+*************************************************************************/
+
+typedef bit<9> egressSpec_t;
+typedef bit<48> macAddr_t;
+typedef bit<32> ip4Addr_t;
+
+header ethernet_t {
+    macAddr_t dstAddr;
+    macAddr_t srcAddr;
+    bit<16> etherType;
+}
+
+header ipv4_t {
+    bit<4> version;
+    bit<4> ihl;
+    bit<8> diffserv;
+    bit<16> totalLen;
+    bit<16> identification;
+    bit<3> flags;
+    bit<13> fragOffset;
+    bit<8> ttl;
+    bit<8> protocol;
+    bit<16> hdrChecksum;
+    ip4Addr_t srcAddr;
+    ip4Addr_t dstAddr;
+}
+
+header udp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<16> length_;
+    bit<16> checksum;
+}
+
+header tcp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<32> seqNo;
+    bit<32> ackNo;
+    bit<4> dataOffset;
+    bit<3> res;
+    bit<3> ecn;
+    bit<6> ctrl;
+    bit<16> window;
+    bit<16> checksum;
+    bit<16> urgentPtr;
+}
+
+header colors_t {
+ bit<8> red1;
+ bit<8> green1;
+ bit<8> blue1;
+
+ bit<8> red2;
+ bit<8> green2;
+ bit<8> blue2;
+
+ bit<8> red3;
+ bit<8> green3;
+ bit<8> blue3;
+
+ bit<8> red4;
+ bit<8> green4;
+ bit<8> blue4;
+
+ bit<8> red5;
+ bit<8> green5;
+ bit<8> blue5;
+
+ bit<8> red6;
+ bit<8> green6;
+ bit<8> blue6;
+
+ bit<8> red7;
+ bit<8> green7;
+ bit<8> blue7;
+
+ bit<8> red8;
+ bit<8> green8;
+ bit<8> blue8;
+
+ bit<8> red9;
+ bit<8> green9;
+ bit<8> blue9;
+}
+
+header counts_t {
+ bit<32> class_decision;
+ bit<32> sequence;
+}
+
+struct metadata {
+    /* empty */
+}
+
+struct headers {
+    ethernet_t ethernet;
+    ipv4_t ipv4;
+    udp_t udp;
+    colors_t colors;
+    counts_t counts;
+}
+
+/*************************************************************************
+*********************** P A R S E R  ***********************************
+*************************************************************************/
+
+parser MyParser(packet_in packet,
+                out headers hdr,
+                inout metadata meta,
+                inout standard_metadata_t standard_metadata) {
+
+    state start {
+        transition parse_ethernet;
+    }
+
+    state parse_ethernet {
+        packet.extract(hdr.ethernet);
+        transition select(hdr.ethernet.etherType) {
+            TYPE_IPV4: parse_ipv4;
+            default: accept;
+        }
+    }
+
+    state parse_ipv4 {
+        packet.extract(hdr.ipv4);
+        //transition parse_tcp;
+        transition parse_udp;
+    }
+
+    state parse_udp {
+        packet.extract(hdr.udp);
+        transition parse_color;
+    }
+
+    //state parse_tcp {
+        //packet.extract(hdr.tcp);
+        //transition parse_color;
+    //}
+
+    state parse_color {
+        packet.extract(hdr.colors);
+        transition parse_counts;
+     }
+    state parse_counts {
+        packet.extract(hdr.counts);
+ transition accept;
+    }
+
+}
+
+/*************************************************************************
+************   C H E C K S U M    V E R I F I C A T I O N   *************
+*************************************************************************/
+
+control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
+    apply { }
+}
+
+
+/*************************************************************************
+**************  I N G R E S S   P R O C E S S I N G   *******************
+*************************************************************************/
+ /* --------------------------------------------------
+	FUNCTION: mul
+	GOAL: 	  Compute multiplication of two fixed-point numbers
+	INPUTS:  A & B (both 32-bit integers)
+	OUTPUT:   A*B (0:28:4 fixed-point number)
+	OBS.:     Output is an approximation
+	-----------------------------------------------------*/
+ control mul(in bit<32> A,
+      in bit<32> B,
+      inout bit<32> result) {
+
+  bit<32> bothInt =32w0;
+  bit<32> AintFrac =32w0;
+  bit<32> BintFrac =32w0;
+  bit<32> bothFrac =32w0;
+  bit<8> tmp=8w0;
+  bit<8> tmp2=8w0;
+
+  action store_frac(bit<32> value) {
+   bothFrac=value;
+  }
+  table frac_mul{
+   key = {
+    tmp: exact;
+   }
+   actions = {
+    store_frac;
+    NoAction;
+   }
+
+   const entries = {
+    8w0 : store_frac(0x0);
+    8w1 : store_frac(0x0);
+    8w2 : store_frac(0x0);
+    8w3 : store_frac(0x0);
+    8w4 : store_frac(0x0);
+    8w5 : store_frac(0x0);
+    8w6 : store_frac(0x0);
+    8w7 : store_frac(0x0);
+    8w8 : store_frac(0x0);
+    8w9 : store_frac(0x0);
+    8w10 : store_frac(0x0);
+    8w11 : store_frac(0x0);
+    8w12 : store_frac(0x0);
+    8w13 : store_frac(0x0);
+    8w14 : store_frac(0x0);
+    8w15 : store_frac(0x0);
+    8w16 : store_frac(0x0);
+    8w17 : store_frac(0x0);
+    8w18 : store_frac(0x0);
+    8w19 : store_frac(0x0);
+    8w20 : store_frac(0x0);
+    8w21 : store_frac(0x0);
+    8w22 : store_frac(0x0);
+    8w23 : store_frac(0x0);
+    8w24 : store_frac(0x0);
+    8w25 : store_frac(0x0);
+    8w26 : store_frac(0x0);
+    8w27 : store_frac(0x0);
+    8w28 : store_frac(0x0);
+    8w29 : store_frac(0x0);
+    8w30 : store_frac(0x0);
+    8w31 : store_frac(0x0);
+    8w32 : store_frac(0x0);
+    8w33 : store_frac(0x0);
+    8w34 : store_frac(0x0);
+    8w35 : store_frac(0x0);
+    8w36 : store_frac(0x0);
+    8w37 : store_frac(0x0);
+    8w38 : store_frac(0x0);
+    8w39 : store_frac(0x0);
+    8w40 : store_frac(0x1);
+    8w41 : store_frac(0x1);
+    8w42 : store_frac(0x1);
+    8w43 : store_frac(0x1);
+    8w44 : store_frac(0x1);
+    8w45 : store_frac(0x1);
+    8w46 : store_frac(0x1);
+    8w47 : store_frac(0x1);
+    8w48 : store_frac(0x0);
+    8w49 : store_frac(0x0);
+    8w50 : store_frac(0x0);
+    8w51 : store_frac(0x0);
+    8w52 : store_frac(0x0);
+    8w53 : store_frac(0x0);
+    8w54 : store_frac(0x1);
+    8w55 : store_frac(0x1);
+    8w56 : store_frac(0x1);
+    8w57 : store_frac(0x1);
+    8w58 : store_frac(0x1);
+    8w59 : store_frac(0x2);
+    8w60 : store_frac(0x2);
+    8w61 : store_frac(0x2);
+    8w62 : store_frac(0x2);
+    8w63 : store_frac(0x2);
+    8w64 : store_frac(0x0);
+    8w65 : store_frac(0x0);
+    8w66 : store_frac(0x0);
+    8w67 : store_frac(0x0);
+    8w68 : store_frac(0x1);
+    8w69 : store_frac(0x1);
+    8w70 : store_frac(0x1);
+    8w71 : store_frac(0x1);
+    8w72 : store_frac(0x2);
+    8w73 : store_frac(0x2);
+    8w74 : store_frac(0x2);
+    8w75 : store_frac(0x2);
+    8w76 : store_frac(0x3);
+    8w77 : store_frac(0x3);
+    8w78 : store_frac(0x3);
+    8w79 : store_frac(0x3);
+    8w80 : store_frac(0x0);
+    8w81 : store_frac(0x0);
+    8w82 : store_frac(0x0);
+    8w83 : store_frac(0x0);
+    8w84 : store_frac(0x1);
+    8w85 : store_frac(0x1);
+    8w86 : store_frac(0x1);
+    8w87 : store_frac(0x2);
+    8w88 : store_frac(0x2);
+    8w89 : store_frac(0x2);
+    8w90 : store_frac(0x3);
+    8w91 : store_frac(0x3);
+    8w92 : store_frac(0x3);
+    8w93 : store_frac(0x4);
+    8w94 : store_frac(0x4);
+    8w95 : store_frac(0x4);
+    8w96 : store_frac(0x0);
+    8w97 : store_frac(0x0);
+    8w98 : store_frac(0x0);
+    8w99 : store_frac(0x1);
+    8w100 : store_frac(0x1);
+    8w101 : store_frac(0x1);
+    8w102 : store_frac(0x2);
+    8w103 : store_frac(0x2);
+    8w104 : store_frac(0x3);
+    8w105 : store_frac(0x3);
+    8w106 : store_frac(0x3);
+    8w107 : store_frac(0x4);
+    8w108 : store_frac(0x4);
+    8w109 : store_frac(0x4);
+    8w110 : store_frac(0x5);
+    8w111 : store_frac(0x5);
+    8w112 : store_frac(0x0);
+    8w113 : store_frac(0x0);
+    8w114 : store_frac(0x0);
+    8w115 : store_frac(0x1);
+    8w116 : store_frac(0x1);
+    8w117 : store_frac(0x2);
+    8w118 : store_frac(0x2);
+    8w119 : store_frac(0x3);
+    8w120 : store_frac(0x3);
+    8w121 : store_frac(0x3);
+    8w122 : store_frac(0x4);
+    8w123 : store_frac(0x4);
+    8w124 : store_frac(0x5);
+    8w125 : store_frac(0x5);
+    8w126 : store_frac(0x6);
+    8w127 : store_frac(0x6);
+    8w128 : store_frac(0x0);
+    8w129 : store_frac(0x0);
+    8w130 : store_frac(0x1);
+    8w131 : store_frac(0x1);
+    8w132 : store_frac(0x2);
+    8w133 : store_frac(0x2);
+    8w134 : store_frac(0x3);
+    8w135 : store_frac(0x3);
+    8w136 : store_frac(0x4);
+    8w137 : store_frac(0x4);
+    8w138 : store_frac(0x5);
+    8w139 : store_frac(0x5);
+    8w140 : store_frac(0x6);
+    8w141 : store_frac(0x6);
+    8w142 : store_frac(0x7);
+    8w143 : store_frac(0x7);
+    8w144 : store_frac(0x0);
+    8w145 : store_frac(0x0);
+    8w146 : store_frac(0x1);
+    8w147 : store_frac(0x1);
+    8w148 : store_frac(0x2);
+    8w149 : store_frac(0x2);
+    8w150 : store_frac(0x3);
+    8w151 : store_frac(0x3);
+    8w152 : store_frac(0x4);
+    8w153 : store_frac(0x5);
+    8w154 : store_frac(0x5);
+    8w155 : store_frac(0x6);
+    8w156 : store_frac(0x6);
+    8w157 : store_frac(0x7);
+    8w158 : store_frac(0x7);
+    8w159 : store_frac(0x8);
+    8w160 : store_frac(0x0);
+    8w161 : store_frac(0x0);
+    8w162 : store_frac(0x1);
+    8w163 : store_frac(0x1);
+    8w164 : store_frac(0x2);
+    8w165 : store_frac(0x3);
+    8w166 : store_frac(0x3);
+    8w167 : store_frac(0x4);
+    8w168 : store_frac(0x5);
+    8w169 : store_frac(0x5);
+    8w170 : store_frac(0x6);
+    8w171 : store_frac(0x6);
+    8w172 : store_frac(0x7);
+    8w173 : store_frac(0x8);
+    8w174 : store_frac(0x8);
+    8w175 : store_frac(0x9);
+    8w176 : store_frac(0x0);
+    8w177 : store_frac(0x0);
+    8w178 : store_frac(0x1);
+    8w179 : store_frac(0x2);
+    8w180 : store_frac(0x2);
+    8w181 : store_frac(0x3);
+    8w182 : store_frac(0x4);
+    8w183 : store_frac(0x4);
+    8w184 : store_frac(0x5);
+    8w185 : store_frac(0x6);
+    8w186 : store_frac(0x6);
+    8w187 : store_frac(0x7);
+    8w188 : store_frac(0x8);
+    8w189 : store_frac(0x8);
+    8w190 : store_frac(0x9);
+    8w191 : store_frac(0xa);
+    8w192 : store_frac(0x0);
+    8w193 : store_frac(0x0);
+    8w194 : store_frac(0x1);
+    8w195 : store_frac(0x2);
+    8w196 : store_frac(0x3);
+    8w197 : store_frac(0x3);
+    8w198 : store_frac(0x4);
+    8w199 : store_frac(0x5);
+    8w200 : store_frac(0x6);
+    8w201 : store_frac(0x6);
+    8w202 : store_frac(0x7);
+    8w203 : store_frac(0x8);
+    8w204 : store_frac(0x9);
+    8w205 : store_frac(0x9);
+    8w206 : store_frac(0xa);
+    8w207 : store_frac(0xb);
+    8w208 : store_frac(0x0);
+    8w209 : store_frac(0x0);
+    8w210 : store_frac(0x1);
+    8w211 : store_frac(0x2);
+    8w212 : store_frac(0x3);
+    8w213 : store_frac(0x4);
+    8w214 : store_frac(0x4);
+    8w215 : store_frac(0x5);
+    8w216 : store_frac(0x6);
+    8w217 : store_frac(0x7);
+    8w218 : store_frac(0x8);
+    8w219 : store_frac(0x8);
+    8w220 : store_frac(0x9);
+    8w221 : store_frac(0xa);
+    8w222 : store_frac(0xb);
+    8w223 : store_frac(0xc);
+    8w224 : store_frac(0x0);
+    8w225 : store_frac(0x0);
+    8w226 : store_frac(0x1);
+    8w227 : store_frac(0x2);
+    8w228 : store_frac(0x3);
+    8w229 : store_frac(0x4);
+    8w230 : store_frac(0x5);
+    8w231 : store_frac(0x6);
+    8w232 : store_frac(0x7);
+    8w233 : store_frac(0x7);
+    8w234 : store_frac(0x8);
+    8w235 : store_frac(0x9);
+    8w236 : store_frac(0xa);
+    8w237 : store_frac(0xb);
+    8w238 : store_frac(0xc);
+    8w239 : store_frac(0xd);
+    8w240 : store_frac(0x0);
+    8w241 : store_frac(0x0);
+    8w242 : store_frac(0x1);
+    8w243 : store_frac(0x2);
+    8w244 : store_frac(0x3);
+    8w245 : store_frac(0x4);
+    8w246 : store_frac(0x5);
+    8w247 : store_frac(0x6);
+    8w248 : store_frac(0x7);
+    8w249 : store_frac(0x8);
+    8w250 : store_frac(0x9);
+    8w251 : store_frac(0xa);
+    8w252 : store_frac(0xb);
+    8w253 : store_frac(0xc);
+    8w254 : store_frac(0xd);
+    8w255 : store_frac(0xe);
+   }
+  }
+  apply {
+   bit<32> intA = 4w0 ++ A[31:4];
+   bit<32> intB = 4w0 ++ B[31:4];
+   bit<32> fracA=28w0 ++ A[3:0];
+   bit<32> fracB=28w0 ++ B[3:0];
+
+   bothInt=intA*intB;
+   bothInt=bothInt << 4;
+
+   AintFrac=intA*fracB;
+   BintFrac=intB*fracA;
+
+   tmp= A[3:0] ++ B[3:0];
+   frac_mul.apply();
+   result=bothInt+AintFrac+BintFrac+bothFrac;
+  }
+
+ }
+ /* --------------------------------------------------
+	FUNCTION: log2
+	GOAL: 	  Compute logarithm base 2
+	INPUTS:   x (32-bit integer)
+	OUTPUT:   log2 x (0:28:4 fixed-point number)
+	OBS.:     Output is an approximation
+	-----------------------------------------------------*/
+ control log2(in bit<32> x,
+       inout bit<32> log_x){
+
+  bit<32> l = 32w0;
+  bit<8> xq = 8w0;
+  bit<32> log_xq = 32w0;
+
+  action store_mssb_index(bit<32> index){
+   l = index;
+  }
+
+  action set_xq(){
+   if(l == 0x00000200){xq = x[31:24];}
+   if(l == 0x000001F0){xq = x[30:23];}
+   if(l == 0x000001E0){xq = x[29:22];}
+   if(l == 0x000001D0){xq = x[28:21];}
+   if(l == 0x000001C0){xq = x[27:20];}
+   if(l == 0x000001B0){xq = x[26:19];}
+   if(l == 0x000001A0){xq = x[25:18];}
+   if(l == 0x00000190){xq = x[24:17];}
+   if(l == 0x00000180){xq = x[23:16];}
+   if(l == 0x00000170){xq = x[22:15];}
+   if(l == 0x00000160){xq = x[21:14];}
+   if(l == 0x00000150){xq = x[20:13];}
+   if(l == 0x00000140){xq = x[19:12];}
+   if(l == 0x00000130){xq = x[18:11];}
+   if(l == 0x00000120){xq = x[17:10];}
+   if(l == 0x00000110){xq = x[16:9];}
+   if(l == 0x00000100){xq = x[15:8];}
+   if(l == 0x000000F0){xq = x[14:7];}
+   if(l == 0x000000E0){xq = x[13:6];}
+   if(l == 0x000000D0){xq = x[12:5];}
+   if(l == 0x000000C0){xq = x[11:4];}
+   if(l == 0x000000B0){xq = x[10:3];}
+   if(l == 0x000000A0){xq = x[9:2];}
+   if(l == 0x00000090){xq = x[8:1];}
+   if(l == 0x00000000){xq = x[7:0];}
+  }
+
+  table MSSB{
+   key = {
+    x: lpm;
+   }
+   actions = {
+    store_mssb_index;
+    NoAction;
+   }
+
+   const entries = {
+    //Most significant set bit position stored in fixed-point representation
+               0x80000000 &&& 32w0x80000000 : store_mssb_index(0x00000200); //32
+    0x40000000 &&& 32w0xc0000000 : store_mssb_index(0x000001F0);
+               0x20000000 &&& 32w0xe0000000 : store_mssb_index(0x000001E0); //30
+    0x10000000 &&& 32w0xf0000000 : store_mssb_index(0x000001D0);
+               0x08000000 &&& 32w0xf8000000 : store_mssb_index(0x000001C0);
+    0x04000000 &&& 32w0xfc000000 : store_mssb_index(0x000001B0);
+               0x02000000 &&& 32w0xfe000000 : store_mssb_index(0x000001A0);
+    0x01000000 &&& 32w0xff000000 : store_mssb_index(0x00000190); //25
+               0x00800000 &&& 32w0xff800000 : store_mssb_index(0x00000180);
+    0x00400000 &&& 32w0xffc00000 : store_mssb_index(0x00000170);
+               0x00200000 &&& 32w0xffe00000 : store_mssb_index(0x00000160);
+    0x00100000 &&& 32w0xfff00000 : store_mssb_index(0x00000150);
+               0x00080000 &&& 32w0xfff80000 : store_mssb_index(0x00000140); //20
+    0x00040000 &&& 32w0xfffc0000 : store_mssb_index(0x00000130);
+               0x00020000 &&& 32w0xfffe0000 : store_mssb_index(0x00000120);
+    0x00010000 &&& 32w0xffff0000 : store_mssb_index(0x00000110);
+               0x00008000 &&& 32w0xffff8000 : store_mssb_index(0x00000100);
+    0x00004000 &&& 32w0xffffc000 : store_mssb_index(0x000000F0); //15
+               0x00002000 &&& 32w0xffffe000 : store_mssb_index(0x000000E0);
+    0x00001000 &&& 32w0xfffff000 : store_mssb_index(0x000000D0);
+               0x00000800 &&& 32w0xfffff800 : store_mssb_index(0x000000C0);
+    0x00000400 &&& 32w0xfffffc00 : store_mssb_index(0x000000B0);
+               0x00000200 &&& 32w0xfffffe00 : store_mssb_index(0x000000A0); //10
+    0x00000100 &&& 32w0xffffff00 : store_mssb_index(0x00000090);
+   }
+  }
+
+  action set_log_xq(bit<32> value){
+   log_xq = value;
+  }
+
+  table logTable{
+   key = {
+    xq: exact;
+   }
+
+   actions = {
+    set_log_xq;
+    NoAction;
+   }
+
+   const entries = {
+    //Log2 of all possible 8-bit integer values
+    (8w0) : set_log_xq(0x00000000);
+    (8w1) : set_log_xq(0x00000000);
+    (8w2) : set_log_xq(0x00000010);
+    (8w3) : set_log_xq(0x00000019);
+    (8w4) : set_log_xq(0x00000020);
+    (8w5) : set_log_xq(0x00000025);
+    (8w6) : set_log_xq(0x00000029);
+    (8w7) : set_log_xq(0x0000002C);
+    (8w8) : set_log_xq(0x00000030);
+    (8w9) : set_log_xq(0x00000032);
+    (8w10) : set_log_xq(0x00000035);
+    (8w11) : set_log_xq(0x00000037);
+    (8w12) : set_log_xq(0x00000039);
+    (8w13) : set_log_xq(0x0000003B);
+    (8w14) : set_log_xq(0x0000003C);
+    (8w15) : set_log_xq(0x0000003E);
+    (8w16) : set_log_xq(0x00000040);
+    (8w17) : set_log_xq(0x00000041);
+    (8w18) : set_log_xq(0x00000042);
+    (8w19) : set_log_xq(0x00000043);
+    (8w20) : set_log_xq(0x00000045);
+    (8w21) : set_log_xq(0x00000046);
+    (8w22) : set_log_xq(0x00000047);
+    (8w23) : set_log_xq(0x00000048);
+    (8w24) : set_log_xq(0x00000049);
+    (8w25) : set_log_xq(0x0000004A);
+    (8w26) : set_log_xq(0x0000004B);
+    (8w27) : set_log_xq(0x0000004C);
+    (8w28) : set_log_xq(0x0000004C);
+    (8w29) : set_log_xq(0x0000004D);
+    (8w30) : set_log_xq(0x0000004E);
+    (8w31) : set_log_xq(0x0000004F);
+    (8w32) : set_log_xq(0x00000050);
+    (8w33) : set_log_xq(0x00000050);
+    (8w34) : set_log_xq(0x00000051);
+    (8w35) : set_log_xq(0x00000052);
+    (8w36) : set_log_xq(0x00000052);
+    (8w37) : set_log_xq(0x00000053);
+    (8w38) : set_log_xq(0x00000053);
+    (8w39) : set_log_xq(0x00000054);
+    (8w40) : set_log_xq(0x00000055);
+    (8w41) : set_log_xq(0x00000055);
+    (8w42) : set_log_xq(0x00000056);
+    (8w43) : set_log_xq(0x00000056);
+    (8w44) : set_log_xq(0x00000057);
+    (8w45) : set_log_xq(0x00000057);
+    (8w46) : set_log_xq(0x00000058);
+    (8w47) : set_log_xq(0x00000058);
+    (8w48) : set_log_xq(0x00000059);
+    (8w49) : set_log_xq(0x00000059);
+    (8w50) : set_log_xq(0x0000005A);
+    (8w51) : set_log_xq(0x0000005A);
+    (8w52) : set_log_xq(0x0000005B);
+    (8w53) : set_log_xq(0x0000005B);
+    (8w54) : set_log_xq(0x0000005C);
+    (8w55) : set_log_xq(0x0000005C);
+    (8w56) : set_log_xq(0x0000005C);
+    (8w57) : set_log_xq(0x0000005D);
+    (8w58) : set_log_xq(0x0000005D);
+    (8w59) : set_log_xq(0x0000005E);
+    (8w60) : set_log_xq(0x0000005E);
+    (8w61) : set_log_xq(0x0000005E);
+    (8w62) : set_log_xq(0x0000005F);
+    (8w63) : set_log_xq(0x0000005F);
+    (8w64) : set_log_xq(0x00000060);
+    (8w65) : set_log_xq(0x00000060);
+    (8w66) : set_log_xq(0x00000060);
+    (8w67) : set_log_xq(0x00000061);
+    (8w68) : set_log_xq(0x00000061);
+    (8w69) : set_log_xq(0x00000061);
+    (8w70) : set_log_xq(0x00000062);
+    (8w71) : set_log_xq(0x00000062);
+    (8w72) : set_log_xq(0x00000062);
+    (8w73) : set_log_xq(0x00000063);
+    (8w74) : set_log_xq(0x00000063);
+    (8w75) : set_log_xq(0x00000063);
+    (8w76) : set_log_xq(0x00000063);
+    (8w77) : set_log_xq(0x00000064);
+    (8w78) : set_log_xq(0x00000064);
+    (8w79) : set_log_xq(0x00000064);
+    (8w80) : set_log_xq(0x00000065);
+    (8w81) : set_log_xq(0x00000065);
+    (8w82) : set_log_xq(0x00000065);
+    (8w83) : set_log_xq(0x00000066);
+    (8w84) : set_log_xq(0x00000066);
+    (8w85) : set_log_xq(0x00000066);
+    (8w86) : set_log_xq(0x00000066);
+    (8w87) : set_log_xq(0x00000067);
+    (8w88) : set_log_xq(0x00000067);
+    (8w89) : set_log_xq(0x00000067);
+    (8w90) : set_log_xq(0x00000067);
+    (8w91) : set_log_xq(0x00000068);
+    (8w92) : set_log_xq(0x00000068);
+    (8w93) : set_log_xq(0x00000068);
+    (8w94) : set_log_xq(0x00000068);
+    (8w95) : set_log_xq(0x00000069);
+    (8w96) : set_log_xq(0x00000069);
+    (8w97) : set_log_xq(0x00000069);
+    (8w98) : set_log_xq(0x00000069);
+    (8w99) : set_log_xq(0x0000006A);
+    (8w100) : set_log_xq(0x0000006A);
+    (8w101) : set_log_xq(0x0000006A);
+    (8w102) : set_log_xq(0x0000006A);
+    (8w103) : set_log_xq(0x0000006A);
+    (8w104) : set_log_xq(0x0000006B);
+    (8w105) : set_log_xq(0x0000006B);
+    (8w106) : set_log_xq(0x0000006B);
+    (8w107) : set_log_xq(0x0000006B);
+    (8w108) : set_log_xq(0x0000006C);
+    (8w109) : set_log_xq(0x0000006C);
+    (8w110) : set_log_xq(0x0000006C);
+    (8w111) : set_log_xq(0x0000006C);
+    (8w112) : set_log_xq(0x0000006C);
+    (8w113) : set_log_xq(0x0000006D);
+    (8w114) : set_log_xq(0x0000006D);
+    (8w115) : set_log_xq(0x0000006D);
+    (8w116) : set_log_xq(0x0000006D);
+    (8w117) : set_log_xq(0x0000006D);
+    (8w118) : set_log_xq(0x0000006E);
+    (8w119) : set_log_xq(0x0000006E);
+    (8w120) : set_log_xq(0x0000006E);
+    (8w121) : set_log_xq(0x0000006E);
+    (8w122) : set_log_xq(0x0000006E);
+    (8w123) : set_log_xq(0x0000006F);
+    (8w124) : set_log_xq(0x0000006F);
+    (8w125) : set_log_xq(0x0000006F);
+    (8w126) : set_log_xq(0x0000006F);
+    (8w127) : set_log_xq(0x0000006F);
+    (8w128) : set_log_xq(0x00000070);
+    (8w129) : set_log_xq(0x00000070);
+    (8w130) : set_log_xq(0x00000070);
+    (8w131) : set_log_xq(0x00000070);
+    (8w132) : set_log_xq(0x00000070);
+    (8w133) : set_log_xq(0x00000070);
+    (8w134) : set_log_xq(0x00000071);
+    (8w135) : set_log_xq(0x00000071);
+    (8w136) : set_log_xq(0x00000071);
+    (8w137) : set_log_xq(0x00000071);
+    (8w138) : set_log_xq(0x00000071);
+    (8w139) : set_log_xq(0x00000071);
+    (8w140) : set_log_xq(0x00000072);
+    (8w141) : set_log_xq(0x00000072);
+    (8w142) : set_log_xq(0x00000072);
+    (8w143) : set_log_xq(0x00000072);
+    (8w144) : set_log_xq(0x00000072);
+    (8w145) : set_log_xq(0x00000072);
+    (8w146) : set_log_xq(0x00000073);
+    (8w147) : set_log_xq(0x00000073);
+    (8w148) : set_log_xq(0x00000073);
+    (8w149) : set_log_xq(0x00000073);
+    (8w150) : set_log_xq(0x00000073);
+    (8w151) : set_log_xq(0x00000073);
+    (8w152) : set_log_xq(0x00000073);
+    (8w153) : set_log_xq(0x00000074);
+    (8w154) : set_log_xq(0x00000074);
+    (8w155) : set_log_xq(0x00000074);
+    (8w156) : set_log_xq(0x00000074);
+    (8w157) : set_log_xq(0x00000074);
+    (8w158) : set_log_xq(0x00000074);
+    (8w159) : set_log_xq(0x00000075);
+    (8w160) : set_log_xq(0x00000075);
+    (8w161) : set_log_xq(0x00000075);
+    (8w162) : set_log_xq(0x00000075);
+    (8w163) : set_log_xq(0x00000075);
+    (8w164) : set_log_xq(0x00000075);
+    (8w165) : set_log_xq(0x00000075);
+    (8w166) : set_log_xq(0x00000076);
+    (8w167) : set_log_xq(0x00000076);
+    (8w168) : set_log_xq(0x00000076);
+    (8w169) : set_log_xq(0x00000076);
+    (8w170) : set_log_xq(0x00000076);
+    (8w171) : set_log_xq(0x00000076);
+    (8w172) : set_log_xq(0x00000076);
+    (8w173) : set_log_xq(0x00000076);
+    (8w174) : set_log_xq(0x00000077);
+    (8w175) : set_log_xq(0x00000077);
+    (8w176) : set_log_xq(0x00000077);
+    (8w177) : set_log_xq(0x00000077);
+    (8w178) : set_log_xq(0x00000077);
+    (8w179) : set_log_xq(0x00000077);
+    (8w180) : set_log_xq(0x00000077);
+    (8w181) : set_log_xq(0x00000077);
+    (8w182) : set_log_xq(0x00000078);
+    (8w183) : set_log_xq(0x00000078);
+    (8w184) : set_log_xq(0x00000078);
+    (8w185) : set_log_xq(0x00000078);
+    (8w186) : set_log_xq(0x00000078);
+    (8w187) : set_log_xq(0x00000078);
+    (8w188) : set_log_xq(0x00000078);
+    (8w189) : set_log_xq(0x00000078);
+    (8w190) : set_log_xq(0x00000079);
+    (8w191) : set_log_xq(0x00000079);
+    (8w192) : set_log_xq(0x00000079);
+    (8w193) : set_log_xq(0x00000079);
+    (8w194) : set_log_xq(0x00000079);
+    (8w195) : set_log_xq(0x00000079);
+    (8w196) : set_log_xq(0x00000079);
+    (8w197) : set_log_xq(0x00000079);
+    (8w198) : set_log_xq(0x0000007A);
+    (8w199) : set_log_xq(0x0000007A);
+    (8w200) : set_log_xq(0x0000007A);
+    (8w201) : set_log_xq(0x0000007A);
+    (8w202) : set_log_xq(0x0000007A);
+    (8w203) : set_log_xq(0x0000007A);
+    (8w204) : set_log_xq(0x0000007A);
+    (8w205) : set_log_xq(0x0000007A);
+    (8w206) : set_log_xq(0x0000007A);
+    (8w207) : set_log_xq(0x0000007B);
+    (8w208) : set_log_xq(0x0000007B);
+    (8w209) : set_log_xq(0x0000007B);
+    (8w210) : set_log_xq(0x0000007B);
+    (8w211) : set_log_xq(0x0000007B);
+    (8w212) : set_log_xq(0x0000007B);
+    (8w213) : set_log_xq(0x0000007B);
+    (8w214) : set_log_xq(0x0000007B);
+    (8w215) : set_log_xq(0x0000007B);
+    (8w216) : set_log_xq(0x0000007C);
+    (8w217) : set_log_xq(0x0000007C);
+    (8w218) : set_log_xq(0x0000007C);
+    (8w219) : set_log_xq(0x0000007C);
+    (8w220) : set_log_xq(0x0000007C);
+    (8w221) : set_log_xq(0x0000007C);
+    (8w222) : set_log_xq(0x0000007C);
+    (8w223) : set_log_xq(0x0000007C);
+    (8w224) : set_log_xq(0x0000007C);
+    (8w225) : set_log_xq(0x0000007D);
+    (8w226) : set_log_xq(0x0000007D);
+    (8w227) : set_log_xq(0x0000007D);
+    (8w228) : set_log_xq(0x0000007D);
+    (8w229) : set_log_xq(0x0000007D);
+    (8w230) : set_log_xq(0x0000007D);
+    (8w231) : set_log_xq(0x0000007D);
+    (8w232) : set_log_xq(0x0000007D);
+    (8w233) : set_log_xq(0x0000007D);
+    (8w234) : set_log_xq(0x0000007D);
+    (8w235) : set_log_xq(0x0000007E);
+    (8w236) : set_log_xq(0x0000007E);
+    (8w237) : set_log_xq(0x0000007E);
+    (8w238) : set_log_xq(0x0000007E);
+    (8w239) : set_log_xq(0x0000007E);
+    (8w240) : set_log_xq(0x0000007E);
+    (8w241) : set_log_xq(0x0000007E);
+    (8w242) : set_log_xq(0x0000007E);
+    (8w243) : set_log_xq(0x0000007E);
+    (8w244) : set_log_xq(0x0000007E);
+    (8w245) : set_log_xq(0x0000007E);
+    (8w246) : set_log_xq(0x0000007F);
+    (8w247) : set_log_xq(0x0000007F);
+    (8w248) : set_log_xq(0x0000007F);
+    (8w249) : set_log_xq(0x0000007F);
+    (8w250) : set_log_xq(0x0000007F);
+    (8w251) : set_log_xq(0x0000007F);
+    (8w252) : set_log_xq(0x0000007F);
+    (8w253) : set_log_xq(0x0000007F);
+    (8w254) : set_log_xq(0x0000007F);
+    (8w255) : set_log_xq(0x0000007F);
+   }
+  }
+
+
+  apply{
+             MSSB.apply();
+      set_xq();
+
+      logTable.apply();
+
+      if(l < 0x00000090){
+   log_x = log_xq;
+      }
+      else{
+   log_x = l - 0x00000080 + log_xq;
+      }
+  }//End apply
+ }
+
+
+ /* --------------------------------------------------
+	FUNCTION: pow2
+	GOAL: 	  Compute exponential base 2
+	INPUTS:   x (0:28:4 fixed-point number)
+	OUTPUT:   2^x (0:28:4 fixed-point number)
+	OBS.:     Output is an approximation
+	-----------------------------------------------------*/
+ control pow2(in bit<32> x,
+       inout bit<32> result){
+
+  bit<32> tmpx = 32w0;
+  bit<32> int_part = 32w1;
+  bit<32> frac_part = 0x00000010;
+
+  action calc_neg_exp(bit<32> expValue){
+   frac_part = expValue;
+  }
+
+  table negFracExp {
+   key = {
+    tmpx[3:0] : exact;
+   }
+
+   actions = {
+    calc_neg_exp;
+    NoAction;
+   }
+
+   const entries = {
+    (4w1) : calc_neg_exp(0x0000000F);
+    (4w2) : calc_neg_exp(0x0000000E);
+    (4w3) : calc_neg_exp(0x0000000E);
+    (4w4) : calc_neg_exp(0x0000000D);
+    (4w5) : calc_neg_exp(0x0000000C);
+    (4w6) : calc_neg_exp(0x0000000C);
+    (4w7) : calc_neg_exp(0x0000000B);
+    (4w8) : calc_neg_exp(0x0000000B);
+    (4w9) : calc_neg_exp(0x0000000A);
+    (4w10) : calc_neg_exp(0x0000000A);
+    (4w11) : calc_neg_exp(0x00000009);
+    (4w12) : calc_neg_exp(0x00000009);
+    (4w13) : calc_neg_exp(0x00000009);
+    (4w14) : calc_neg_exp(0x00000008);
+    (4w15) : calc_neg_exp(0x00000008);
+   }
+  }
+
+  action calc_pos_exp(bit<32> expValue){
+   frac_part = expValue;
+  }
+
+  table posFracExp {
+   key = {
+    x[3:0] : exact;
+   }
+
+   actions = {
+    calc_pos_exp;
+    NoAction;
+   }
+
+   const entries = {
+    (4w1) : calc_pos_exp(0x00000010);
+    (4w2) : calc_pos_exp(0x00000011);
+    (4w3) : calc_pos_exp(0x00000012);
+    (4w4) : calc_pos_exp(0x00000013);
+    (4w5) : calc_pos_exp(0x00000013);
+    (4w6) : calc_pos_exp(0x00000014);
+    (4w7) : calc_pos_exp(0x00000015);
+    (4w8) : calc_pos_exp(0x00000016);
+    (4w9) : calc_pos_exp(0x00000017);
+    (4w10) : calc_pos_exp(0x00000018);
+    (4w11) : calc_pos_exp(0x00000019);
+    (4w12) : calc_pos_exp(0x0000001A);
+    (4w13) : calc_pos_exp(0x0000001C);
+    (4w14) : calc_pos_exp(0x0000001D);
+    (4w15) : calc_pos_exp(0x0000001E);
+   }
+  }
+
+
+  apply{
+      if( x == 32w0 ){
+   result = 0x00000010;
+      }
+      else{
+       if( x[31:31] == 1w1 ){
+    //Negative exponent
+   int_part = 32w0x00000010;
+    tmpx = (~x) + 1;
+
+    //Compute integer part of exponent. Must do RIGHT shifts.
+    int_part = int_part >> tmpx[11:4];
+
+    if( tmpx[3:0] != 4w0 ){
+        //Compute fractional part
+                      negFracExp.apply();
+                  }
+
+    //TODO: add overflow checks
+    result = int_part * frac_part;
+    result = result >> 4;
+       }
+              else{
+    //Positive exponent
+
+    //Compute integer part of exponent. Must do LEFT shifts.
+    int_part = int_part << x[11:4];
+
+                  if( x[3:0] != 4w0 ){
+        //Compute fractional part
+                      posFracExp.apply();
+                  }
+
+    //TODO: add overflow checks
+    result = int_part * frac_part;
+              }
+
+
+      }
+
+  }//End apply
+ }
+
+
+ /* --------------------------------------------------
+	FUNCTION: div
+	GOAL: 	  Divide two values
+	INPUTS:   A (32-bit integer)
+		  B (32-bit integer)
+	OUTPUT:   A/B (0:28:4 fixed-point number)
+	OBS.:     Output is an approximation
+	-----------------------------------------------------*/
+ control div(in bit<32> A,
+      in bit<32> B,
+      inout bit<32> result){
+
+  log2() logA;
+  log2() logB;
+  pow2() pow;
+
+  bit<32> tmp = 32w0;
+  bit<32> logAA = 32w0;
+  bit<32> logBB = 32w0;
+
+  apply{
+   logA.apply(A, logAA);
+   logB.apply(B, logBB);
+          tmp = logAA-logBB;
+   pow.apply(tmp, result);
+  }
+ }
+
+control MyIngress(inout headers hdr,
+                  inout metadata meta,
+                  inout standard_metadata_t standard_metadata) {
+
+    //feature1 colors
+   register<bit<1>>(445000) bloom_filter;
+   bit<32> filter_address;
+   bit<1> filter_value;
+
+    //feature2,3,4 low,mid,high intensity
+   register<bit<32>>(3) gray_reg;
+   bit<32> low_gray;
+   bit<32> mid_gray;
+   bit<32> high_gray;
+   bit<32> low_ratio=32w0;
+   bit<32> mid_ratio=32w0;
+   bit<32> high_ratio=32w0;
+
+   //feature6,7 brightness, contrast
+   register<bit<32>>(1) count_reg;
+   register<bit<32>>(1) count_intensity;
+   bit<32>count;
+   bit<32> gray_pixel1=32w0;
+   bit<32> gray_pixel2=32w0;
+   bit<32> gray_pixel3=32w0;
+   bit<32> gray_pixel4=32w0;
+   bit<32> gray_pixel5=32w0;
+   bit<32> gray_pixel6=32w0;
+   bit<32> gray_pixel7=32w0;
+   bit<32> gray_pixel8=32w0;
+   bit<32> gray_pixel9=32w0;
+   bit<32> intensity_count=32w0;
+   bit<32> brightness=32w0;
+
+    //feature7 contrast
+    register<bit<32>>(2) gray_maxmin;
+    bit<32> min_gray=32w99999;
+    bit<32> max_gray=32w0;
+    bit<32> contrast=32w0;
+    register<bit<32>>(1) packets;
+    bit<32> packetno=32w0;
+
+    //feature5 edge_count
+    register<int<32>>(1) laplace_prev;
+    register<bit<32>>(1) count_edge;
+    bit<32> edge_count;
+    int<32> prev_laplace;
+    int<32> laplace;
+
+
+
+    div() DivBrightness;
+    div() DivContrast;
+    div() DivLowIntensity;
+    div() DivMidIntensity;
+    div() DivHighIntensity;
+
+    mul() MulRed1;
+    mul() MulGreen1;
+    mul() MulBlue1;
+
+    mul() MulRed2;
+    mul() MulGreen2;
+    mul() MulBlue2;
+
+    mul() MulRed3;
+    mul() MulGreen3;
+    mul() MulBlue3;
+
+    mul() MulRed4;
+    mul() MulGreen4;
+    mul() MulBlue4;
+
+    mul() MulRed5;
+    mul() MulGreen5;
+    mul() MulBlue5;
+
+    mul() MulRed6;
+    mul() MulGreen6;
+    mul() MulBlue6;
+
+    mul() MulRed7;
+    mul() MulGreen7;
+    mul() MulBlue7;
+
+    mul() MulRed8;
+    mul() MulGreen8;
+    mul() MulBlue8;
+
+    mul() MulRed9;
+    mul() MulGreen9;
+    mul() MulBlue9;
+
+    bit<32> final_class=32w0;
+    bit<32> feature1=32w0;
+    bit<32> feature2=32w0;
+    bit<32> feature3=32w0;
+    bit<32> feature4=32w0;
+    bit<32> feature5=32w0;
+    bit<32> feature6=32w0;
+    bit<32> feature7=32w0;
+
+    action drop() {
+        mark_to_drop(standard_metadata);
+    }
+
+     action compute_hashes(bit<8> colorR, bit<8> colorG, bit<8> colorB){
+       //here all the colors are considered to create a hash address for the register position
+       hash(filter_address, HashAlgorithm.crc32, (bit<32>)0, {colorR,
+                                                           colorG,
+                                                           colorB},
+                                                           (bit<32>)445000);
+
+    }
+
+    action set_port(egressSpec_t port) {
+ standard_metadata.egress_spec=port;
+    }
+
+    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
+        hdr.ethernet.dstAddr = dstAddr;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+    }
+
+    action class_value(bit<32> value) {
+ final_class=value;
+    }
+
+    table ipv4_lpm {
+        key = {
+            hdr.ipv4.dstAddr: lpm;
+        }
+        actions = {
+            ipv4_forward;
+            drop;
+            NoAction;
+        }
+        size = 1024;
+        default_action = drop();
+    }
+
+    table forwarding {
+ key = {
+  hdr.udp.dstPort: exact;
+ }
+ actions = {
+  set_port;
+  drop;
+ }
+    }
+
+    table decision_table {
+        key = {
+            feature1: range;
+     feature2: range;
+     feature3: range;
+     feature4: range;
+     feature5: range;
+     feature6: range;
+     feature7: range;
+        }
+        actions = {
+            class_value;
+            NoAction;
+        }
+ size=20480;
+    }
+
+    apply {
+
+        if (hdr.ipv4.isValid()) {
+
+     packets.read(packetno,0);
+     packetno=packetno+1;
+     packets.write(0,packetno);
+
+     //read values from register, store in the variables
+     count_reg.read(count,0);
+     count_intensity.read(intensity_count,0);
+     count_edge.read(edge_count,0);
+     laplace_prev.read(prev_laplace,0);
+     gray_reg.read(low_gray,0);
+     gray_reg.read(mid_gray,1);
+     gray_reg.read(high_gray,2);
+     gray_maxmin.read(min_gray,0);
+     gray_maxmin.read(max_gray,1);
+
+
+
+     bit<32> red_M=32w6; //approx 0.299
+     bit<32> green_M=32w9; //approx 0.587
+            bit<32> blue_M=32w2; //approx 0.114
+     bit<32> coeff_result=32w0;
+
+
+     //formula is gray=0.299*red + 0.587*green +0.114*blue, this is done for each pixel form the chunk
+    bit<32> red_C1=(bit<32>)hdr.colors.red1 << 4;
+    bit<32> green_C1=(bit<32>)hdr.colors.green1 << 4;
+    bit<32> blue_C1=(bit<32>)hdr.colors.blue1 << 4;
+
+    bit<32> red_C2=(bit<32>)hdr.colors.red2 << 4;
+    bit<32> green_C2=(bit<32>)hdr.colors.green2 << 4;
+    bit<32> blue_C2=(bit<32>)hdr.colors.blue2 << 4;
+
+    bit<32> red_C3=(bit<32>)hdr.colors.red3 << 4;
+    bit<32> green_C3=(bit<32>)hdr.colors.green3 << 4;
+    bit<32> blue_C3=(bit<32>)hdr.colors.blue3 << 4;
+
+    bit<32> red_C4=(bit<32>)hdr.colors.red4 << 4;
+    bit<32> green_C4=(bit<32>)hdr.colors.green4 << 4;
+    bit<32> blue_C4=(bit<32>)hdr.colors.blue4 << 4;
+
+    bit<32> red_C5=(bit<32>)hdr.colors.red5 << 4;
+    bit<32> green_C5=(bit<32>)hdr.colors.green5 << 4;
+    bit<32> blue_C5=(bit<32>)hdr.colors.blue5 << 4;
+
+    bit<32> red_C6=(bit<32>)hdr.colors.red6 << 4;
+    bit<32> green_C6=(bit<32>)hdr.colors.green6 << 4;
+    bit<32> blue_C6=(bit<32>)hdr.colors.blue6 << 4;
+
+    bit<32> red_C7=(bit<32>)hdr.colors.red7 << 4;
+    bit<32> green_C7=(bit<32>)hdr.colors.green7 << 4;
+    bit<32> blue_C7=(bit<32>)hdr.colors.blue7 << 4;
+
+    bit<32> red_C8=(bit<32>)hdr.colors.red8 << 4;
+    bit<32> green_C8=(bit<32>)hdr.colors.green8 << 4;
+    bit<32> blue_C8=(bit<32>)hdr.colors.blue8 << 4;
+
+    bit<32> red_C9=(bit<32>)hdr.colors.red9 << 4;
+    bit<32> green_C9=(bit<32>)hdr.colors.green9 << 4;
+    bit<32> blue_C9=(bit<32>)hdr.colors.blue9 << 4;
+
+
+
+
+     MulRed1.apply(red_M,red_C1,coeff_result);
+     gray_pixel1=gray_pixel1+coeff_result;
+     MulGreen1.apply(green_M,green_C1,coeff_result); //using color information to convert to grayscale value for pixel 1
+     gray_pixel1=gray_pixel1+coeff_result;
+     MulBlue1.apply(blue_M,blue_C1,coeff_result);
+     gray_pixel1=gray_pixel1+coeff_result;
+
+     MulRed2.apply(red_M,red_C2,coeff_result);
+     gray_pixel2=gray_pixel2+coeff_result;
+     MulGreen2.apply(green_M,green_C2,coeff_result); //using color information to convert to grayscale value for pixel 2
+     gray_pixel2=gray_pixel2+coeff_result;
+     MulBlue2.apply(blue_M,blue_C2,coeff_result);
+     gray_pixel2=gray_pixel2+coeff_result;
+
+     MulRed3.apply(red_M,red_C3,coeff_result);
+     gray_pixel3=gray_pixel3+coeff_result;
+     MulGreen3.apply(green_M,green_C3,coeff_result); //using color information to convert to grayscale value for pixel 3
+     gray_pixel3=gray_pixel3+coeff_result;
+     MulBlue3.apply(blue_M,blue_C3,coeff_result);
+     gray_pixel3=gray_pixel3+coeff_result;
+
+     MulRed4.apply(red_M,red_C4,coeff_result);
+     gray_pixel4=gray_pixel4+coeff_result;
+     MulGreen4.apply(green_M,green_C4,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel4=gray_pixel4+coeff_result;
+     MulBlue4.apply(blue_M,blue_C4,coeff_result);
+     gray_pixel4=gray_pixel4+coeff_result;
+
+     MulRed5.apply(red_M,red_C5,coeff_result);
+     gray_pixel5=gray_pixel5+coeff_result;
+     MulGreen5.apply(green_M,green_C5,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel5=gray_pixel5+coeff_result;
+     MulBlue5.apply(blue_M,blue_C5,coeff_result);
+     gray_pixel5=gray_pixel5+coeff_result;
+
+     MulRed6.apply(red_M,red_C6,coeff_result);
+     gray_pixel6=gray_pixel6+coeff_result;
+     MulGreen6.apply(green_M,green_C6,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel6=gray_pixel6+coeff_result;
+     MulBlue6.apply(blue_M,blue_C6,coeff_result);
+     gray_pixel6=gray_pixel6+coeff_result;
+
+     MulRed7.apply(red_M,red_C7,coeff_result);
+     gray_pixel7=gray_pixel7+coeff_result;
+     MulGreen7.apply(green_M,green_C7,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel7=gray_pixel7+coeff_result;
+     MulBlue7.apply(blue_M,blue_C7,coeff_result);
+     gray_pixel7=gray_pixel7+coeff_result;
+
+     MulRed8.apply(red_M,red_C8,coeff_result);
+     gray_pixel8=gray_pixel8+coeff_result;
+     MulGreen8.apply(green_M,green_C8,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel8=gray_pixel8+coeff_result;
+     MulBlue8.apply(blue_M,blue_C8,coeff_result);
+     gray_pixel8=gray_pixel8+coeff_result;
+
+     MulRed9.apply(red_M,red_C9,coeff_result);
+     gray_pixel9=gray_pixel9+coeff_result;
+     MulGreen9.apply(green_M,green_C9,coeff_result); //using color information to convert to grayscale value for pixel 4
+     gray_pixel9=gray_pixel9+coeff_result;
+     MulBlue9.apply(blue_M,blue_C9,coeff_result);
+     gray_pixel9=gray_pixel9+coeff_result;
+
+
+
+
+
+
+
+     bit<4> floating=gray_pixel1[3:0];
+     gray_pixel1=gray_pixel1 >> 4;
+     if (floating >= 8) {
+  gray_pixel1=gray_pixel1+1; //If fractional part for the value is above 0.5 (8 in fixed-point notation), ceiling is taken
+     }
+     if (gray_pixel1 > 255) gray_pixel1 = 32w255;
+
+     floating=gray_pixel2[3:0];
+     gray_pixel2=gray_pixel2 >> 4;
+     if (floating >= 8) {
+  gray_pixel2=gray_pixel2+1;
+     }
+     if (gray_pixel2 > 255) gray_pixel2 = 32w255;
+
+     floating=gray_pixel3[3:0];
+     gray_pixel3=gray_pixel3 >> 4;
+     if (floating >= 8) {
+  gray_pixel3=gray_pixel3+1;
+     }
+     if (gray_pixel3 > 255) gray_pixel3 = 32w255;
+
+     floating=gray_pixel4[3:0];
+     gray_pixel4=gray_pixel4 >> 4;
+     if (floating >= 8) {
+  gray_pixel4=gray_pixel4+1;
+     }
+     if (gray_pixel4 > 255) gray_pixel4 = 32w255;
+
+     floating=gray_pixel5[3:0];
+     gray_pixel5=gray_pixel5 >> 4;
+     if (floating >= 8) {
+  gray_pixel5=gray_pixel5+1;
+     }
+     if (gray_pixel5 > 255) gray_pixel5 = 32w255;
+
+     floating=gray_pixel6[3:0];
+     gray_pixel6=gray_pixel6 >> 4;
+     if (floating >= 8) {
+  gray_pixel6=gray_pixel6+1;
+     }
+     if (gray_pixel6 > 255) gray_pixel6 = 32w255;
+
+     floating=gray_pixel7[3:0];
+     gray_pixel7=gray_pixel7 >> 4;
+     if (floating >= 8) {
+  gray_pixel7=gray_pixel7+1;
+     }
+     if (gray_pixel7 > 255) gray_pixel7 = 32w255;
+
+     floating=gray_pixel8[3:0];
+     gray_pixel8=gray_pixel8 >> 4;
+     if (floating >= 8) {
+  gray_pixel8=gray_pixel8+1;
+     }
+     if (gray_pixel8 > 255) gray_pixel8 = 32w255;
+
+     floating=gray_pixel9[3:0];
+     gray_pixel9=gray_pixel9 >> 4;
+     if (floating >= 8) {
+  gray_pixel9=gray_pixel9+1;
+     }
+     if (gray_pixel9 > 255) gray_pixel9 = 32w255;
+
+
+     if (min_gray==0) min_gray=9999;
+
+     if (gray_pixel1 > max_gray) max_gray=gray_pixel1; //for finding maximum and minimum intensity for contrast calculation
+     if (gray_pixel1 < min_gray && gray_pixel1!=0) min_gray=gray_pixel1;
+
+     if (gray_pixel2 > max_gray) max_gray=gray_pixel2;
+     if (gray_pixel2 < min_gray && gray_pixel2!=0) min_gray=gray_pixel2;
+
+     if (gray_pixel3 > max_gray) max_gray=gray_pixel3;
+     if (gray_pixel3 < min_gray && gray_pixel3!=0) min_gray=gray_pixel3;
+
+     if (gray_pixel4 > max_gray) max_gray=gray_pixel4;
+     if (gray_pixel4 < min_gray && gray_pixel4!=0) min_gray=gray_pixel4;
+
+     if (gray_pixel5 > max_gray) max_gray=gray_pixel5;
+     if (gray_pixel5 < min_gray && gray_pixel5!=0) min_gray=gray_pixel5;
+
+     if (gray_pixel6 > max_gray) max_gray=gray_pixel6;
+     if (gray_pixel6 < min_gray && gray_pixel6!=0) min_gray=gray_pixel6;
+
+     if (gray_pixel7 > max_gray) max_gray=gray_pixel7;
+     if (gray_pixel7 < min_gray && gray_pixel7!=0) min_gray=gray_pixel7;
+
+     if (gray_pixel8 > max_gray) max_gray=gray_pixel8;
+     if (gray_pixel8 < min_gray && gray_pixel8!=0) min_gray=gray_pixel8;
+
+     if (gray_pixel9 > max_gray) max_gray=gray_pixel9;
+     if (gray_pixel9< min_gray && gray_pixel9!=0) min_gray=gray_pixel9;
+
+    intensity_count=intensity_count+gray_pixel1;
+    intensity_count=intensity_count+gray_pixel2;
+    intensity_count=intensity_count+gray_pixel3;
+    intensity_count=intensity_count+gray_pixel4;
+    intensity_count=intensity_count+gray_pixel5;
+    intensity_count=intensity_count+gray_pixel6;
+    intensity_count=intensity_count+gray_pixel7;
+    intensity_count=intensity_count+gray_pixel8;
+    intensity_count=intensity_count+gray_pixel9;
+
+
+     compute_hashes(hdr.colors.red1,hdr.colors.green1,hdr.colors.blue1);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel1 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel1 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel1 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+
+     compute_hashes(hdr.colors.red2,hdr.colors.green2,hdr.colors.blue2);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel2 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel2 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel2 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+
+     compute_hashes(hdr.colors.red3,hdr.colors.green3,hdr.colors.blue3);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel3 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel3 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel3 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+
+     compute_hashes(hdr.colors.red4,hdr.colors.green4,hdr.colors.blue4);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel4 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel4 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel4 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+     compute_hashes(hdr.colors.red5,hdr.colors.green5,hdr.colors.blue5);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel5 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel5 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel5 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+     compute_hashes(hdr.colors.red6,hdr.colors.green6,hdr.colors.blue6);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel6< 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel6 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel6< 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+     compute_hashes(hdr.colors.red7,hdr.colors.green7,hdr.colors.blue7);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel7 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel7 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel7< 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+     compute_hashes(hdr.colors.red8,hdr.colors.green8,hdr.colors.blue8);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel8 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel8 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel8 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+     compute_hashes(hdr.colors.red9,hdr.colors.green9,hdr.colors.blue9);
+     //read the bloom filter value at that hashed address
+     bloom_filter.read(filter_value,filter_address);
+     //if its 0, that means its a new color, increment counter
+     if (hdr.udp.srcPort!=10000) {
+      if ( gray_pixel9 < 85 ) {
+           low_gray = low_gray + 1;
+             }
+     else if ( gray_pixel9 < 170 ) {
+      mid_gray = mid_gray + 1;
+             }
+     else if (gray_pixel9 < 256) {
+      high_gray = high_gray + 1;
+                    }
+             if (filter_value==0 ) {
+       count=count+1;
+      }
+     }
+         //if its new color, set the value as 1. If its old, the value is 1 anyways
+     bloom_filter.write(filter_address,1);
+
+
+
+     laplace=8*(int<32>)gray_pixel5-(int<32>)gray_pixel1-(int<32>)gray_pixel2-(int<32>)gray_pixel3-(int<32>)gray_pixel4-(int<32>)gray_pixel6-(int<32>)gray_pixel7-(int<32>)gray_pixel8-(int<32>)gray_pixel9;
+
+     if (prev_laplace!=0) {
+  if (laplace*prev_laplace < 0) {
+   edge_count=edge_count+1;
+  }
+            }
+     if (laplace != 0) {
+  prev_laplace=laplace;
+     }
+
+
+     if (hdr.udp.srcPort==10000) {
+
+  bit<32> total_pixel=packetno*9;
+  total_pixel=total_pixel << 4;
+  bit<32> divresult=32w0;
+
+  //Low Intensity Ratio
+  low_gray=low_gray << 4;
+  DivLowIntensity.apply(low_gray,total_pixel,divresult);
+  low_gray=divresult;
+
+  //Mid Intensity Ratio
+  mid_gray=mid_gray << 4;
+  DivMidIntensity.apply(mid_gray,total_pixel,divresult);
+  mid_gray=divresult;
+
+  //High Intensity Ratio
+  high_gray=high_gray << 4;
+  DivHighIntensity.apply(high_gray,total_pixel,divresult);
+  high_gray=divresult;
+
+  //Contrast
+  bit<32> contrast_num=max_gray-min_gray;
+  contrast_num=contrast_num <<4;
+  bit<32> contrast_den=max_gray+min_gray;
+  contrast_den=contrast_den <<4;
+  DivContrast.apply(contrast_num,contrast_den,contrast);
+
+  //Brightness
+  intensity_count=intensity_count << 4;
+  DivBrightness.apply(intensity_count,total_pixel,brightness);
+
+
+
+  feature1=count;
+  feature2=low_gray;
+  feature3=mid_gray;
+  feature4=high_gray;
+  feature5=edge_count;
+  feature6=brightness;
+  feature7=contrast;
+
+  decision_table.apply();
+  hdr.counts.class_decision=final_class;
+  hdr.counts.sequence=packetno;
+
+  low_gray=0;
+  mid_gray=0;
+  high_gray=0;
+  count=0;
+  min_gray=0;
+  max_gray=0;
+     }
+
+
+     //write the counter value to register
+     count_reg.write(0,count);
+     count_intensity.write(0,intensity_count);
+     count_edge.write(0,edge_count);
+     laplace_prev.write(0,prev_laplace);
+     gray_reg.write(0,low_gray);
+     gray_reg.write(1,mid_gray);
+     gray_reg.write(2,high_gray);
+     gray_maxmin.write(0,min_gray);
+     gray_maxmin.write(1,max_gray);
+
+
+     forwarding.apply();
+
+        }
+    }
+}
+
+/*************************************************************************
+****************  E G R E S S   P R O C E S S I N G   *******************
+*************************************************************************/
+
+control MyEgress(inout headers hdr,
+                 inout metadata meta,
+                 inout standard_metadata_t standard_metadata) {
+    apply { }
+}
+
+/*************************************************************************
+*************   C H E C K S U M    C O M P U T A T I O N   **************
+*************************************************************************/
+
+control MyComputeChecksum(inout headers hdr, inout metadata meta) {
+     apply {
+ update_checksum(
+     hdr.ipv4.isValid(),
+            { hdr.ipv4.version,
+       hdr.ipv4.ihl,
+              hdr.ipv4.diffserv,
+              hdr.ipv4.totalLen,
+              hdr.ipv4.identification,
+              hdr.ipv4.flags,
+              hdr.ipv4.fragOffset,
+              hdr.ipv4.ttl,
+              hdr.ipv4.protocol,
+              hdr.ipv4.srcAddr,
+              hdr.ipv4.dstAddr },
+            hdr.ipv4.hdrChecksum,
+            HashAlgorithm.csum16);
+    }
+}
+
+/*************************************************************************
+***********************  D E P A R S E R  *******************************
+*************************************************************************/
+
+control MyDeparser(packet_out packet, in headers hdr) {
+    apply {
+        packet.emit(hdr.ethernet);
+        packet.emit(hdr.ipv4);
+        //packet.emit(hdr.tcp);
+ packet.emit(hdr.udp);
+ //packet.emit(hdr.colors);
+ packet.emit(hdr.counts);
+    }
+}
+
+/*************************************************************************
+***********************  S W I T C H  *******************************
+*************************************************************************/
+
+V1Switch(
+MyParser(),
+MyVerifyChecksum(),
+MyIngress(),
+MyEgress(),
+MyComputeChecksum(),
+MyDeparser()
+) main;
